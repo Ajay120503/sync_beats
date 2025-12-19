@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../context/SocketContext";
 import { useAuth } from "../context/AuthContext";
-import {
-  FaPlay,
-  FaPause,
-  FaMusic,
-  FaUserShield,
-  FaUsers,
-} from "react-icons/fa";
+import { FaPlay, FaPause, FaMusic, FaUserShield } from "react-icons/fa";
 
 export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
   const audioRef = useRef(null);
@@ -21,64 +15,94 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
 
   const songToRender = currentSong || syncedSong;
 
+  const safePlay = async (audioEl) => {
+    try {
+      const result = audioEl.play();
+      if (result?.catch) result.catch(() => {});
+    } catch {}
+  };
+
+  // Join room
   useEffect(() => {
     if (!socket || !user) return;
     socket.emit("join-room", { roomId, userId: user._id });
   }, [socket, user, roomId]);
 
+  // Sync state for all members
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("sync-state", ({ song, currentTime, isPlaying }) => {
-      console.log("SYNC STATE RECEIVED", song?.title, currentTime, isPlaying);
+    const handler = ({ song, currentTime, isPlaying }) => {
       if (!audioRef.current || !song) return;
+
+      const audioEl = audioRef.current;
 
       if (!isHost) {
         setSyncedSong(song);
-        const audioEl = audioRef.current;
+
         if (audioEl.src !== song.url) audioEl.src = song.url;
-        audioEl.currentTime = currentTime || 0;
-        isPlaying ? audioEl.play().catch(() => {}) : audioEl.pause();
+
+        if (!isNaN(currentTime)) audioEl.currentTime = currentTime;
+
+        if (isPlaying) safePlay(audioEl);
+        else audioEl.pause();
       }
 
       setIsPlaying(isPlaying);
       setProgress(
         ((currentTime || 0) / (audioRef.current.duration || 1)) * 100
       );
-    });
+    };
 
-    return () => socket.off("sync-state");
+    socket.on("sync-state", handler);
+    return () => socket.off("sync-state", handler);
   }, [socket, isHost]);
 
+  // Incoming play request (host sees modal)
   useEffect(() => {
     if (!socket || !isHost) return;
 
-    socket.on("incoming-play-request", ({ song, requestedBy }) => {
-      setIncomingRequest({ song, requestedBy });
-    });
+    // Inside sync-state handler:
+    const handler = ({ song, currentTime, isPlaying }) => {
+      if (!audioRef.current || !song) return;
 
-    return () => socket.off("incoming-play-request");
+      const audioEl = audioRef.current;
+
+      // Update currentSong for UI
+      setCurrentSong(song);
+
+      if (audioEl.src !== song.url) audioEl.src = song.url;
+
+      if (!isNaN(currentTime)) audioEl.currentTime = currentTime;
+
+      if (isPlaying) safePlay(audioEl);
+      else audioEl.pause();
+
+      setIsPlaying(isPlaying);
+      setProgress(((currentTime || 0) / (audioEl.duration || 1)) * 100);
+    };
+
+    socket.on("incoming-play-request", handler);
+    return () => socket.off("incoming-play-request", handler);
   }, [socket, isHost]);
 
+  // Handle host accept/reject
   const handleRequestResponse = (accepted) => {
     if (!incomingRequest) return;
-    const { song, requestedBy } = incomingRequest;
+
+    const { song, requestedBySocket } = incomingRequest;
 
     socket.emit("respond-play-request", {
       roomId,
       song,
-      requestedBy,
+      requestedBySocket,
       accepted,
     });
 
-    if (accepted) {
+    if (accepted && isHost) {
       setCurrentSong(song);
-      const audioEl = audioRef.current;
-      audioEl.src = song.url;
-      audioEl.currentTime = 0;
-      audioEl.play();
-      setIsPlaying(true);
 
+      // HOST does NOT play manually; server emits sync-state for all members
       socket.emit("play-song", {
         roomId,
         song,
@@ -100,11 +124,13 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
     if (!isHost || !songToRender || !audioRef.current) return;
 
     const audioEl = audioRef.current;
+
     if (audioEl.src !== songToRender.url) {
       audioEl.src = songToRender.url;
       audioEl.currentTime = 0;
     }
-    await audioEl.play();
+
+    await safePlay(audioEl);
     setIsPlaying(true);
 
     socket.emit("play-song", {
@@ -167,7 +193,6 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
               {isPlaying ? <FaPause /> : <FaPlay />}
             </button>
 
-            {/* Icon badge for host/listener & playback */}
             {isHost ? (
               <span className="text-green-600 flex items-center gap-1">
                 <FaUserShield /> Host
@@ -206,11 +231,12 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
             <p className="py-4">
               User{" "}
               <span className="font-medium">
-                {incomingRequest.requestedBy.username}
+                {incomingRequest.requestedBy?.username || "User"}
               </span>{" "}
               requested to play:{" "}
               <span className="font-medium">{incomingRequest.song.title}</span>
             </p>
+
             <div className="modal-action">
               <button
                 type="button"
@@ -219,6 +245,7 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
               >
                 Accept
               </button>
+
               <button
                 type="button"
                 className="btn btn-error"
@@ -233,3 +260,5 @@ export default function AudioPlayer({ roomId, currentSong, setCurrentSong }) {
     </>
   );
 }
+
+

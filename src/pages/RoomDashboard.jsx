@@ -6,10 +6,12 @@ import AddSongModal from "../components/AddSongModal";
 import { useAuth } from "../context/AuthContext";
 import AudioPlayer from "../components/AudioPlayer";
 import { FaMusic, FaPlus, FaUserShield } from "react-icons/fa";
+import { useSocket } from "../context/SocketContext";
 
 export default function RoomDashboard() {
   const { id } = useParams();
   const { user } = useAuth();
+  const { socket } = useSocket();
   const navigate = useNavigate();
 
   const [songs, setSongs] = useState([]);
@@ -48,6 +50,33 @@ export default function RoomDashboard() {
   }, [id]);
 
   const isOwner = user?.role === "admin" || room?.owner?._id === user?._id;
+
+  // ---------------- SOCKET LISTENERS ----------------
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    // Member: handle host response to play requests
+    const handleRequestResponse = ({ accepted, song, userId }) => {
+      if (userId === user._id) {
+        if (accepted) setCurrentSong(song);
+      }
+    };
+
+    // Member: receive current room state when joining (sync playback)
+    const handleSyncState = (state) => {
+      if (state?.song) {
+        setCurrentSong(state.song); // ensures UI sync & "Playing" badge
+      }
+    };
+
+    socket.on("request-play-response", handleRequestResponse);
+    socket.on("sync-state", handleSyncState);
+
+    return () => {
+      socket.off("request-play-response", handleRequestResponse);
+      socket.off("sync-state", handleSyncState);
+    };
+  }, [socket, user.id]);
 
   if (loading)
     return (
@@ -117,6 +146,7 @@ export default function RoomDashboard() {
               refresh={fetchSongs}
               roomId={id}
               setCurrentSong={setCurrentSong}
+              currentSong={currentSong}
             />
           ))}
         </div>

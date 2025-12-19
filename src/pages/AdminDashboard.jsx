@@ -58,9 +58,9 @@ export default function AdminDashboard() {
       </div>
 
       {/* Users Table */}
-      <div className="card bg-base-100 border shadow-lg">
+      <div className="card bg-base-100 border-base-300 border shadow-lg">
         <div className="card-body p-0">
-          <div className="p-5 border-b flex items-center gap-3">
+          <div className="p-5 border-b border-base-300 flex items-center gap-3">
             <FaUsers className="text-primary" />
             <h2 className="text-xl font-semibold">Registered Users</h2>
           </div>
